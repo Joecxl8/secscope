@@ -10,6 +10,7 @@ A lightweight, zero-dependency domain security auditor that inspects live TLS/SS
 - **Built-In Protections:** Blocks private/local IP ranges (`10.x`, `127.x`, `192.168.x`, `172.16–31.x`, link-local, loopback) to mitigate SSRF, and escapes all rendered output to prevent XSS.
 - 
 Author
+
 Built by Joe Manu Thomas (@Joecxl8)
 
 ## Architecture
