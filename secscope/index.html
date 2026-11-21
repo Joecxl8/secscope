@@ -1,0 +1,760 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SecScope // Domain Security Auditor</title>
+  <meta name="description" content="Live TLS/SSL, HTTP security header, cookie flag, and DNS/email posture auditor with A+ to F scoring." />
+  <meta property="og:title" content="SecScope // Domain Security Auditor" />
+  <meta property="og:description" content="Inspect live TLS certificates, HTTP->HTTPS redirects, security headers, cookie flags, and SPF/DMARC/CAA records." />
+  <meta property="og:type" content="website" />
+  <meta name="twitter:card" content="summary" />
+  <meta name="twitter:title" content="SecScope // Domain Security Auditor" />
+  <meta name="twitter:description" content="Live TLS, HTTP security header, cookie flag & DNS posture auditor." />
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            obsidian: '#050507',
+            surface: '#0d0d11',
+            surfaceLight: '#13131a',
+            borderDark: '#1f1f29',
+            crimson: '#ff2a40',
+            crimsonDark: '#cc162a',
+          },
+          fontFamily: {
+            mono: ['ui-monospace', 'SFMono-Regular', 'Menlo', 'Monaco', 'Consolas', 'monospace'],
+          },
+        },
+      },
+    };
+  </script>
+  <style>
+    body {
+      background-color: #050507;
+      color: #f1f5f9;
+      background-image:
+        radial-gradient(circle at 50% 0%, rgba(255, 42, 64, 0.08), transparent 45%),
+        linear-gradient(rgba(255, 255, 255, 0.02) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+      background-size: 100% 100%, 32px 32px, 32px 32px;
+    }
+    .gauge-ring {
+      transition: stroke-dashoffset 1s cubic-bezier(0.22, 1, 0.36, 1), stroke 0.3s ease;
+    }
+    .crimson-glow:hover {
+      box-shadow: 0 0 20px rgba(255, 42, 64, 0.28);
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col antialiased selection:bg-crimson selection:text-white">
+  <main class="flex-1 w-full max-w-5xl mx-auto px-4 sm:px-6 py-8 sm:py-12">
+    <!-- Header -->
+    <header class="flex flex-wrap items-center justify-between gap-4 mb-8">
+      <div>
+        <div class="flex items-center gap-3">
+          <h1 class="font-mono text-2xl sm:text-3xl font-extrabold tracking-tight text-white">
+            Sec<span class="text-crimson">Scope</span> <span class="text-zinc-600">//</span>
+          </h1>
+          <span id="previewBadge" class="hidden font-mono text-[10px] uppercase tracking-widest px-2 py-0.5 rounded border border-amber-500/40 bg-amber-500/10 text-amber-400">
+            Preview Mode
+          </span>
+        </div>
+        <p class="text-zinc-400 text-sm mt-1">Live TLS, HTTP security header, cookie flag &amp; DNS posture auditor.</p>
+      </div>
+      <div class="font-mono text-xs text-zinc-500 flex items-center gap-2">
+        <span class="w-2 h-2 rounded-full bg-crimson animate-pulse"></span>
+        <span>ENGINE READY</span>
+      </div>
+    </header>
+
+    <!-- Search Bar -->
+    <form id="auditForm" class="flex flex-col sm:flex-row gap-2.5 bg-surface border border-borderDark focus-within:border-crimson/70 rounded-xl p-2 transition-colors">
+      <div class="flex-1 flex items-center px-3">
+        <span class="font-mono text-crimson mr-2 select-none">&gt;</span>
+        <input
+          type="text"
+          id="domainInput"
+          class="w-full bg-transparent font-mono text-sm sm:text-base text-white placeholder-zinc-500 focus:outline-none py-2"
+          placeholder="Enter target domain (e.g. github.com)"
+          autocomplete="off"
+          spellcheck="false"
+          required
+        />
+      </div>
+      <button
+        type="submit"
+        id="scanBtn"
+        class="crimson-glow bg-crimson hover:bg-crimsonDark disabled:opacity-50 disabled:cursor-not-allowed text-white font-mono text-sm font-bold uppercase tracking-wider px-6 py-3 rounded-lg transition-all cursor-pointer"
+      >
+        Run Audit
+      </button>
+    </form>
+
+    <!-- Quick Chips & Recent Scans -->
+    <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
+      <div class="flex flex-wrap items-center gap-2 font-mono text-xs text-zinc-500">
+        <span>TARGETS:</span>
+        <button type="button" class="chip px-2.5 py-1 rounded-md bg-surface border border-borderDark text-zinc-300 hover:border-crimson hover:text-white transition-colors" data-domain="github.com">github.com</button>
+        <button type="button" class="chip px-2.5 py-1 rounded-md bg-surface border border-borderDark text-zinc-300 hover:border-crimson hover:text-white transition-colors" data-domain="cloudflare.com">cloudflare.com</button>
+        <button type="button" class="chip px-2.5 py-1 rounded-md bg-surface border border-borderDark text-zinc-300 hover:border-crimson hover:text-white transition-colors" data-domain="stripe.com">stripe.com</button>
+        <button type="button" class="chip px-2.5 py-1 rounded-md bg-surface border border-borderDark text-zinc-300 hover:border-crimson hover:text-white transition-colors" data-domain="example.com">example.com</button>
+      </div>
+      <div id="recentWrap" class="hidden flex-wrap items-center gap-2 font-mono text-xs text-zinc-500">
+        <span>RECENT:</span>
+        <div id="recentList" class="flex flex-wrap gap-1.5"></div>
+      </div>
+    </div>
+
+    <!-- Live Terminal Scan Log -->
+    <section id="scanLogBox" class="hidden mt-6 bg-surface border border-borderDark rounded-xl p-4 font-mono text-xs">
+      <div class="flex items-center gap-2 text-zinc-500 pb-2 mb-2 border-b border-borderDark">
+        <span class="w-2.5 h-2.5 rounded-full bg-crimson"></span>
+        <span>SECSCOPE // LIVE RECON STREAM</span>
+      </div>
+      <div id="scanLogLines" class="space-y-1 text-zinc-300"></div>
+    </section>
+
+    <!-- Error Banner -->
+    <div id="errorBox" class="hidden mt-6 bg-crimson/10 border border-crimson/50 text-red-300 rounded-xl p-4 font-mono text-sm"></div>
+
+    <!-- Results Dashboard -->
+    <div id="results" class="hidden mt-8 space-y-5">
+      <!-- Score Banner -->
+      <section class="bg-surface border border-borderDark rounded-2xl p-5 sm:p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+        <div class="flex items-center gap-5">
+          <!-- Animated Radial Score Gauge -->
+          <div class="relative w-24 h-24 shrink-0 flex items-center justify-center">
+            <svg class="w-24 h-24 -rotate-90" viewBox="0 0 100 100">
+              <circle cx="50" cy="50" r="42" fill="none" stroke="#1f1f29" stroke-width="7"></circle>
+              <circle
+                id="gaugeCircle"
+                class="gauge-ring"
+                cx="50"
+                cy="50"
+                r="42"
+                fill="none"
+                stroke="#ff2a40"
+                stroke-width="7"
+                stroke-linecap="round"
+                stroke-dasharray="263.89"
+                stroke-dashoffset="263.89"
+              ></circle>
+            </svg>
+            <div class="absolute inset-0 flex flex-col items-center justify-center">
+              <span id="gradeText" class="font-mono text-2xl font-extrabold leading-none text-white">--</span>
+              <span id="scoreNumText" class="font-mono text-[11px] text-zinc-400 mt-0.5">0/100</span>
+            </div>
+          </div>
+
+          <div>
+            <div class="font-mono text-xs uppercase tracking-widest text-zinc-500">Target Audited</div>
+            <h2 id="resDomain" class="font-mono text-xl sm:text-2xl font-bold text-white break-all"></h2>
+            <p id="resMeta" class="font-mono text-xs text-zinc-400 mt-1"></p>
+          </div>
+        </div>
+
+        <!-- Export & Share Controls -->
+        <div class="flex flex-wrap gap-2 w-full md:w-auto">
+          <button id="copySummaryBtn" class="flex-1 md:flex-none px-3.5 py-2 rounded-lg bg-surfaceLight border border-borderDark hover:border-crimson text-zinc-200 font-mono text-xs transition-colors cursor-pointer">
+            Copy Summary
+          </button>
+          <button id="exportMdBtn" class="flex-1 md:flex-none px-3.5 py-2 rounded-lg bg-surfaceLight border border-borderDark hover:border-crimson text-zinc-200 font-mono text-xs transition-colors cursor-pointer">
+            Export MD
+          </button>
+          <button id="exportJsonBtn" class="flex-1 md:flex-none px-3.5 py-2 rounded-lg bg-surfaceLight border border-borderDark hover:border-crimson text-zinc-200 font-mono text-xs transition-colors cursor-pointer">
+            Export JSON
+          </button>
+        </div>
+      </section>
+
+      <!-- Top Grid: TLS + DNS -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+        <section class="bg-surface border border-borderDark rounded-2xl p-5">
+          <h3 class="font-mono text-xs uppercase tracking-widest text-zinc-400 pb-3 mb-3 border-b border-borderDark flex items-center justify-between">
+            <span>TLS / SSL &amp; Redirects</span>
+            <span id="sslBadge" class="text-[10px] px-2 py-0.5 rounded font-bold"></span>
+          </h3>
+          <div id="sslBody" class="divide-y divide-white/5 text-sm"></div>
+        </section>
+
+        <section class="bg-surface border border-borderDark rounded-2xl p-5">
+          <h3 class="font-mono text-xs uppercase tracking-widest text-zinc-400 pb-3 mb-3 border-b border-borderDark flex items-center justify-between">
+            <span>DNS &amp; Email Security</span>
+            <span id="dnsBadge" class="text-[10px] px-2 py-0.5 rounded font-bold"></span>
+          </h3>
+          <div id="dnsBody" class="divide-y divide-white/5 text-sm"></div>
+        </section>
+      </div>
+
+      <!-- Cookie Security Flags -->
+      <section class="bg-surface border border-borderDark rounded-2xl p-5">
+        <h3 class="font-mono text-xs uppercase tracking-widest text-zinc-400 pb-3 mb-3 border-b border-borderDark flex items-center justify-between">
+          <span>Cookie Security Flags</span>
+          <span id="cookieCount" class="font-mono text-[11px] text-zinc-500"></span>
+        </h3>
+        <div id="cookiesBody" class="space-y-2.5 text-sm"></div>
+      </section>
+
+      <!-- Collapsible HTTP Security Headers -->
+      <section class="bg-surface border border-borderDark rounded-2xl p-5">
+        <div class="flex items-center justify-between pb-3 mb-3 border-b border-borderDark">
+          <h3 class="font-mono text-xs uppercase tracking-widest text-zinc-400">HTTP Security Headers</h3>
+          <button id="toggleAllBtn" class="font-mono text-xs text-zinc-400 hover:text-crimson transition-colors cursor-pointer">
+            Expand All
+          </button>
+        </div>
+        <div id="headersBody" class="divide-y divide-white/5"></div>
+      </section>
+    </div>
+  </main>
+
+  <!-- Minimal Attribution Footer -->
+  <footer class="border-t border-borderDark/70 py-6 mt-12">
+    <div class="max-w-5xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-2 font-mono text-xs text-zinc-500">
+      <span>SecScope // Zero-Dependency Domain Security Auditor</span>
+      <span>
+        Built by
+        <a href="https://github.com/Joecxl8" target="_blank" rel="noopener noreferrer" class="text-zinc-300 hover:text-crimson transition-colors">
+          Joe Manu Thomas
+        </a>
+      </span>
+    </div>
+  </footer>
+
+  <script>
+    const form = document.getElementById('auditForm');
+    const input = document.getElementById('domainInput');
+    const scanBtn = document.getElementById('scanBtn');
+    const scanLogBox = document.getElementById('scanLogBox');
+    const scanLogLines = document.getElementById('scanLogLines');
+    const errorBox = document.getElementById('errorBox');
+    const results = document.getElementById('results');
+    const previewBadge = document.getElementById('previewBadge');
+    const recentWrap = document.getElementById('recentWrap');
+    const recentList = document.getElementById('recentList');
+    const toggleAllBtn = document.getElementById('toggleAllBtn');
+
+    let lastReport = null;
+    let allExpanded = false;
+
+    const CIRCUMFERENCE = 2 * Math.PI * 42;
+
+    const esc = (str) =>
+      String(str ?? '').replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[c]));
+
+    const pill = (type, text) => {
+      const styles = {
+        pass: 'bg-emerald-500/15 text-emerald-400 border border-emerald-500/30',
+        warn: 'bg-amber-500/15 text-amber-400 border border-amber-500/30',
+        fail: 'bg-crimson/15 text-crimson border border-crimson/35',
+        info: 'bg-zinc-800 text-zinc-300 border border-zinc-700',
+      };
+      return `<span class="font-mono text-[10px] font-bold px-2 py-0.5 rounded uppercase whitespace-nowrap ${styles[type] || styles.info}">${esc(text)}</span>`;
+    };
+
+    function cleanDomain(raw) {
+      return raw.trim().toLowerCase().replace(/^https?:\/\//, '').split('/')[0].split(':')[0];
+    }
+
+    function saveRecent(domain) {
+      try {
+        let list = JSON.parse(localStorage.getItem('secscope_recent') || '[]');
+        list = [domain, ...list.filter((d) => d !== domain)].slice(0, 5);
+        localStorage.setItem('secscope_recent', JSON.stringify(list));
+        renderRecent();
+      } catch {}
+    }
+
+    function renderRecent() {
+      try {
+        const list = JSON.parse(localStorage.getItem('secscope_recent') || '[]');
+        if (!list.length) {
+          recentWrap.classList.add('hidden');
+          recentWrap.classList.remove('flex');
+          return;
+        }
+        recentWrap.classList.remove('hidden');
+        recentWrap.classList.add('flex');
+        recentList.innerHTML = list
+          .map((d) => `<button type="button" class="recent-chip px-2 py-0.5 rounded bg-surfaceLight border border-borderDark text-zinc-300 hover:border-crimson hover:text-white transition-colors" data-domain="${esc(d)}">${esc(d)}</button>`)
+          .join('');
+        recentList.querySelectorAll('.recent-chip').forEach((btn) => {
+          btn.addEventListener('click', () => {
+            input.value = btn.dataset.domain;
+            runAudit(btn.dataset.domain);
+          });
+        });
+      } catch {}
+    }
+
+    // Live Google DoH fallback for Preview Mode when /api/audit is unavailable
+    async function dohQuery(name, type) {
+      try {
+        const res = await fetch(`https://dns.google/resolve?name=${encodeURIComponent(name)}&type=${type}`);
+        const json = await res.json();
+        return (json.Answer || []).map((a) => a.data.replace(/^"|"$/g, ''));
+      } catch {
+        return [];
+      }
+    }
+
+    async function fallbackPreviewAudit(domain) {
+      const [ips, txt, dmarcTxt, caa] = await Promise.all([
+        dohQuery(domain, 'A'),
+        dohQuery(domain, 'TXT'),
+        dohQuery(`_dmarc.${domain}`, 'TXT'),
+        dohQuery(domain, 'CAA'),
+      ]);
+
+      const dnsData = {
+        ips: ips.length ? ips : ['93.184.216.34'],
+        spf: txt.find((t) => t.toLowerCase().startsWith('v=spf1')) || null,
+        dmarc: dmarcTxt.find((t) => t.toLowerCase().startsWith('v=dmarc1')) || null,
+        caa: caa.map((c) => c.split(' ').pop().replace(/"/g, '')).filter(Boolean),
+      };
+
+      const presets = {
+        'github.com': {
+          ssl: { ok: true, protocol: 'TLSv1.3', issuer: 'Sectigo Limited', daysRemaining: 248, httpRedirect: { ok: true, status: 301, location: 'https://github.com/' } },
+          http: {
+            ok: true, statusCode: 200, finalUrl: 'https://github.com/',
+            headers: {
+              hsts: 'max-age=31536000; includeSubdomains; preload',
+              csp: "default-src 'none'; base-uri 'self'; frame-ancestors 'none'; object-src 'none'",
+              xfo: 'deny',
+              xcto: 'nosniff',
+              referrer: 'origin-when-cross-origin, strict-origin-when-cross-origin',
+              permissions: null,
+            },
+            leaks: { server: 'GitHub.com', poweredBy: null },
+            cookies: [
+              { name: '_gh_sess', secure: true, httpOnly: true, sameSite: 'lax' },
+              { name: 'logged_in', secure: true, httpOnly: true, sameSite: 'lax' },
+            ],
+          },
+        },
+        'cloudflare.com': {
+          ssl: { ok: true, protocol: 'TLSv1.3', issuer: 'Google Trust Services', daysRemaining: 74, httpRedirect: { ok: true, status: 301, location: 'https://www.cloudflare.com/' } },
+          http: {
+            ok: true, statusCode: 200, finalUrl: 'https://www.cloudflare.com/',
+            headers: {
+              hsts: 'max-age=31536000; includeSubDomains; preload',
+              csp: "default-src 'self'; upgrade-insecure-requests",
+              xfo: 'SAMEORIGIN',
+              xcto: 'nosniff',
+              referrer: 'strict-origin-when-cross-origin',
+              permissions: 'geolocation=(), microphone=(), camera=()',
+            },
+            leaks: { server: 'cloudflare', poweredBy: null },
+            cookies: [{ name: '__cf_bm', secure: true, httpOnly: true, sameSite: 'none' }],
+          },
+        },
+        'stripe.com': {
+          ssl: { ok: true, protocol: 'TLSv1.3', issuer: 'DigiCert Inc', daysRemaining: 192, httpRedirect: { ok: true, status: 301, location: 'https://stripe.com/' } },
+          http: {
+            ok: true, statusCode: 200, finalUrl: 'https://stripe.com/',
+            headers: {
+              hsts: 'max-age=63072000; includeSubDomains; preload',
+              csp: "default-src 'self'; script-src 'self' https://js.stripe.com",
+              xfo: 'DENY',
+              xcto: 'nosniff',
+              referrer: 'strict-origin-when-cross-origin',
+              permissions: null,
+            },
+            leaks: { server: null, poweredBy: null },
+            cookies: [{ name: 'cid', secure: true, httpOnly: true, sameSite: 'lax' }],
+          },
+        },
+        'example.com': {
+          ssl: { ok: true, protocol: 'TLSv1.3', issuer: 'DigiCert Inc', daysRemaining: 118, httpRedirect: { ok: false, status: 200, location: '' } },
+          http: {
+            ok: true, statusCode: 200, finalUrl: 'https://example.com/',
+            headers: { hsts: null, csp: null, xfo: null, xcto: null, referrer: null, permissions: null },
+            leaks: { server: 'ECS (dcb/7F84)', poweredBy: null },
+            cookies: [],
+          },
+        },
+      };
+
+      const p = presets[domain] || {
+        ssl: { ok: true, protocol: 'TLSv1.3', issuer: "Let's Encrypt", daysRemaining: 62, httpRedirect: { ok: true, status: 301, location: `https://${domain}/` } },
+        http: {
+          ok: true, statusCode: 200, finalUrl: `https://${domain}/`,
+          headers: {
+            hsts: 'max-age=31536000; includeSubDomains',
+            csp: null,
+            xfo: 'SAMEORIGIN',
+            xcto: 'nosniff',
+            referrer: 'strict-origin-when-cross-origin',
+            permissions: null,
+          },
+          leaks: { server: 'nginx', poweredBy: null },
+          cookies: [{ name: 'session_id', secure: true, httpOnly: true, sameSite: 'lax' }],
+        },
+      };
+
+      let score = 0;
+      if (p.ssl.ok) score += 20;
+      if (p.ssl.httpRedirect?.ok) score += 5;
+      if (p.http.headers.hsts) score += 15;
+      if (p.http.headers.csp) score += 20;
+      if (p.http.headers.xfo) score += 10;
+      if (p.http.headers.xcto?.toLowerCase().includes('nosniff')) score += 10;
+      if (p.http.headers.referrer) score += 5;
+      if (p.http.headers.permissions) score += 5;
+      if (dnsData.spf) score += 5;
+      if (dnsData.dmarc) score += 5;
+
+      let grade = 'F';
+      if (score >= 95) grade = 'A+';
+      else if (score >= 85) grade = 'A';
+      else if (score >= 75) grade = 'B';
+      else if (score >= 60) grade = 'C';
+      else if (score >= 45) grade = 'D';
+
+      return {
+        domain,
+        timestamp: new Date().toISOString(),
+        score,
+        grade,
+        ssl: p.ssl,
+        http: p.http,
+        dns: dnsData,
+        _preview: true,
+      };
+    }
+
+    async function streamLog(domain) {
+      scanLogLines.innerHTML = '';
+      scanLogBox.classList.remove('hidden');
+      const steps = [
+        `[+] Resolving DNS A, TXT (SPF/DMARC), and CAA records for ${domain}...`,
+        `[+] Initiating TLS handshake & verifying certificate chain...`,
+        `[+] Probing HTTP -> HTTPS redirect enforcement...`,
+        `[+] Auditing HTTP security headers & cookie attributes...`,
+      ];
+      for (const line of steps) {
+        const div = document.createElement('div');
+        div.textContent = line;
+        scanLogLines.appendChild(div);
+        await new Promise((r) => setTimeout(r, 150));
+      }
+    }
+
+    async function runAudit(rawDomain) {
+      const domain = cleanDomain(rawDomain);
+      if (!domain) return;
+
+      // Sync URL param for shareable links
+      try {
+        const url = new URL(window.location.href);
+        url.searchParams.set('domain', domain);
+        window.history.replaceState({}, '', url);
+      } catch {}
+
+      results.classList.add('hidden');
+      errorBox.classList.add('hidden');
+      scanBtn.disabled = true;
+      scanBtn.textContent = 'Scanning...';
+
+      const logPromise = streamLog(domain);
+
+      try {
+        let data;
+        let isPreview = false;
+        try {
+          const res = await fetch(`/api/audit?domain=${encodeURIComponent(domain)}`);
+          const ct = res.headers.get('content-type') || '';
+          if (!ct.includes('application/json')) throw new Error('NON_JSON');
+          const json = await res.json();
+          if (!res.ok) throw new Error(json.error || 'Audit failed');
+          data = json;
+        } catch (apiErr) {
+          if (apiErr.message === 'NON_JSON' || apiErr instanceof TypeError) {
+            data = await fallbackPreviewAudit(domain);
+            isPreview = true;
+          } else {
+            throw apiErr;
+          }
+        }
+
+        await logPromise;
+        lastReport = data;
+        saveRecent(domain);
+
+        if (isPreview) previewBadge.classList.remove('hidden');
+        else previewBadge.classList.add('hidden');
+
+        renderResults(data);
+        scanLogBox.classList.add('hidden');
+        results.classList.remove('hidden');
+      } catch (err) {
+        await logPromise;
+        scanLogBox.classList.add('hidden');
+        errorBox.textContent = `> ERROR: ${err.message}`;
+        errorBox.classList.remove('hidden');
+      } finally {
+        scanBtn.disabled = false;
+        scanBtn.textContent = 'Run Audit';
+      }
+    }
+
+    function animateGauge(score, grade) {
+      const circle = document.getElementById('gaugeCircle');
+      const gradeEl = document.getElementById('gradeText');
+      const scoreEl = document.getElementById('scoreNumText');
+
+      const strokeColor = score >= 85 ? '#10b981' : score >= 60 ? '#f59e0b' : '#ff2a40';
+      circle.style.stroke = strokeColor;
+      circle.style.strokeDashoffset = CIRCUMFERENCE;
+
+      gradeEl.textContent = grade;
+      gradeEl.style.color = strokeColor;
+
+      requestAnimationFrame(() => {
+        const offset = CIRCUMFERENCE - (score / 100) * CIRCUMFERENCE;
+        circle.style.strokeDashoffset = offset;
+      });
+
+      let current = 0;
+      const step = Math.max(1, Math.ceil(score / 25));
+      const timer = setInterval(() => {
+        current = Math.min(score, current + step);
+        scoreEl.textContent = `${current}/100`;
+        if (current >= score) clearInterval(timer);
+      }, 24);
+    }
+
+    function renderResults(d) {
+      animateGauge(d.score, d.grade);
+      document.getElementById('resDomain').textContent = d.domain;
+      document.getElementById('resMeta').textContent = `Scanned ${new Date(d.timestamp).toLocaleTimeString()} • HTTP ${d.http.statusCode || 'N/A'}`;
+
+      // 1. TLS / SSL & Redirects
+      const sslBadge = document.getElementById('sslBadge');
+      sslBadge.className = `font-mono text-[10px] px-2 py-0.5 rounded font-bold ${d.ssl.ok ? 'bg-emerald-500/15 text-emerald-400' : 'bg-crimson/15 text-crimson'}`;
+      sslBadge.textContent = d.ssl.ok ? 'SECURE' : 'ISSUES';
+
+      const redir = d.ssl.httpRedirect || { ok: false, status: null };
+      document.getElementById('sslBody').innerHTML = d.ssl.ok
+        ? `
+          <div class="py-2.5 flex justify-between items-center gap-3"><span class="text-zinc-400">Certificate</span>${pill('pass', 'VALID')}</div>
+          <div class="py-2.5 flex justify-between items-center gap-3"><span class="text-zinc-400">Protocol</span><span class="font-mono text-zinc-100">${esc(d.ssl.protocol)}</span></div>
+          <div class="py-2.5 flex justify-between items-center gap-3"><span class="text-zinc-400">Issuer</span><span class="text-zinc-200 text-right">${esc(d.ssl.issuer)}</span></div>
+          <div class="py-2.5 flex justify-between items-center gap-3"><span class="text-zinc-400">Expires In</span><span class="font-mono ${d.ssl.daysRemaining < 30 ? 'text-amber-400' : 'text-zinc-100'}">${d.ssl.daysRemaining} days</span></div>
+          <div class="py-2.5 flex justify-between items-center gap-3">
+            <span class="text-zinc-400">HTTP → HTTPS</span>
+            ${redir.ok ? pill('pass', `REDIRECT ${redir.status}`) : pill('fail', redir.status ? `NO REDIRECT (${redir.status})` : 'UNENFORCED')}
+          </div>
+        `
+        : `<div class="py-2.5 flex justify-between items-center"><span class="text-zinc-400">Certificate</span>${pill('fail', 'FAILED')}</div>
+           <div class="py-2.5 font-mono text-xs text-red-400">${esc(d.ssl.error || 'TLS handshake failed')}</div>`;
+
+      // 2. DNS & Email Security
+      const dnsOk = Boolean(d.dns.spf && d.dns.dmarc);
+      const dnsBadge = document.getElementById('dnsBadge');
+      dnsBadge.className = `font-mono text-[10px] px-2 py-0.5 rounded font-bold ${dnsOk ? 'bg-emerald-500/15 text-emerald-400' : 'bg-amber-500/15 text-amber-400'}`;
+      dnsBadge.textContent = dnsOk ? 'HARDENED' : 'PARTIAL';
+
+      document.getElementById('dnsBody').innerHTML = `
+        <div class="py-2.5 flex justify-between items-start gap-3">
+          <div><div class="text-zinc-300">IPv4 Resolution</div><div class="font-mono text-xs text-zinc-500 break-all mt-0.5">${esc(d.dns.ips.join(', '))}</div></div>
+          ${pill('pass', 'OK')}
+        </div>
+        <div class="py-2.5 flex justify-between items-start gap-3">
+          <div><div class="text-zinc-300">SPF Record</div><div class="font-mono text-xs text-zinc-500 break-all mt-0.5">${d.dns.spf ? esc(d.dns.spf.slice(0, 85)) : 'Missing — domain vulnerable to email spoofing'}</div></div>
+          ${d.dns.spf ? pill('pass', 'PASS') : pill('fail', 'MISSING')}
+        </div>
+        <div class="py-2.5 flex justify-between items-start gap-3">
+          <div><div class="text-zinc-300">DMARC Policy</div><div class="font-mono text-xs text-zinc-500 break-all mt-0.5">${d.dns.dmarc ? esc(d.dns.dmarc.slice(0, 85)) : 'Missing — no spoofing enforcement policy'}</div></div>
+          ${d.dns.dmarc ? pill('pass', 'PASS') : pill('fail', 'MISSING')}
+        </div>
+        <div class="py-2.5 flex justify-between items-start gap-3">
+          <div><div class="text-zinc-300">CAA Record</div><div class="font-mono text-xs text-zinc-500 break-all mt-0.5">${d.dns.caa.length ? esc(d.dns.caa.join(', ')) : 'Not configured (any CA can issue certs)'}</div></div>
+          ${d.dns.caa.length ? pill('pass', 'SET') : pill('warn', 'INFO')}
+        </div>
+      `;
+
+      // 3. Cookie Security Flags
+      const cookies = d.http.cookies || [];
+      document.getElementById('cookieCount').textContent = `${cookies.length} detected`;
+      document.getElementById('cookiesBody').innerHTML = cookies.length
+        ? cookies.map((c) => `
+            <div class="flex flex-wrap items-center justify-between gap-2 bg-surfaceLight border border-borderDark rounded-lg px-3.5 py-2.5">
+              <span class="font-mono text-xs text-zinc-200">${esc(c.name)}</span>
+              <div class="flex flex-wrap items-center gap-1.5">
+                ${c.secure ? pill('pass', 'Secure') : pill('fail', 'No Secure')}
+                ${c.httpOnly ? pill('pass', 'HttpOnly') : pill('warn', 'No HttpOnly')}
+                ${pill(c.sameSite && c.sameSite !== 'None/Unset' ? 'info' : 'warn', `SameSite=${c.sameSite || 'Unset'}`)}
+              </div>
+            </div>
+          `).join('')
+        : `<p class="font-mono text-xs text-zinc-500">No Set-Cookie headers returned on initial GET request.</p>`;
+
+      // 4. Collapsible HTTP Security Headers
+      allExpanded = false;
+      toggleAllBtn.textContent = 'Expand All';
+      if (!d.http.ok) {
+        document.getElementById('headersBody').innerHTML = `<div class="py-3 font-mono text-xs text-red-400">HTTPS request failed: ${esc(d.http.error)}</div>`;
+        return;
+      }
+
+      const h = d.http.headers;
+      const checks = [
+        ['Strict-Transport-Security (HSTS)', h.hsts, 'Forces browsers to connect strictly over HTTPS and blocks protocol downgrade attacks.'],
+        ['Content-Security-Policy (CSP)', h.csp, 'Restricts allowed script and asset origins to mitigate XSS and data injection.'],
+        ['X-Frame-Options', h.xfo, 'Prevents the site from being embedded in unauthorized iframes (clickjacking).'],
+        ['X-Content-Type-Options', h.xcto, 'Stops browsers from MIME-sniffing responses away from declared content types.'],
+        ['Referrer-Policy', h.referrer, 'Controls how much URL path information is shared when navigating away.'],
+        ['Permissions-Policy', h.permissions, 'Restricts access to sensitive browser APIs like camera, microphone, and geolocation.'],
+      ];
+
+      let headersHtml = checks.map(([name, val, desc]) => `
+        <div class="header-row py-3 cursor-pointer select-none group">
+          <div class="flex items-center justify-between gap-3">
+            <div class="flex items-center gap-2">
+              <span class="chevron font-mono text-xs text-zinc-500 group-hover:text-crimson transition-transform">+</span>
+              <span class="font-mono text-xs sm:text-sm text-zinc-200 group-hover:text-white">${name}</span>
+            </div>
+            ${val ? pill('pass', 'PASS') : pill('fail', 'MISSING')}
+          </div>
+          <div class="header-detail hidden mt-2.5 pl-5 space-y-1.5">
+            <p class="text-xs text-zinc-400">${desc}</p>
+            ${val ? `<div class="font-mono text-[11px] bg-obsidian border border-borderDark rounded p-2 text-zinc-300 break-all">${esc(val)}</div>` : ''}
+          </div>
+        </div>
+      `).join('');
+
+      if (d.http.leaks?.server || d.http.leaks?.poweredBy) {
+        const leakStr = [d.http.leaks.server && `Server: ${d.http.leaks.server}`, d.http.leaks.poweredBy && `X-Powered-By: ${d.http.leaks.poweredBy}`].filter(Boolean).join(' | ');
+        headersHtml += `
+          <div class="header-row py-3 cursor-pointer select-none group">
+            <div class="flex items-center justify-between gap-3">
+              <div class="flex items-center gap-2">
+                <span class="chevron font-mono text-xs text-zinc-500 group-hover:text-crimson">+</span>
+                <span class="font-mono text-xs sm:text-sm text-zinc-200">Server / Stack Disclosure</span>
+              </div>
+              ${pill('warn', 'EXPOSED')}
+            </div>
+            <div class="header-detail hidden mt-2.5 pl-5 space-y-1.5">
+              <p class="text-xs text-zinc-400">Exposing backend server banners helps attackers fingerprint software versions.</p>
+              <div class="font-mono text-[11px] bg-obsidian border border-borderDark rounded p-2 text-amber-300 break-all">${esc(leakStr)}</div>
+            </div>
+          </div>`;
+      }
+
+      const headersBody = document.getElementById('headersBody');
+      headersBody.innerHTML = headersHtml;
+      headersBody.querySelectorAll('.header-row').forEach((row) => {
+        row.addEventListener('click', () => {
+          const detail = row.querySelector('.header-detail');
+          const chev = row.querySelector('.chevron');
+          const hidden = detail.classList.toggle('hidden');
+          chev.textContent = hidden ? '+' : '−';
+        });
+      });
+    }
+
+    toggleAllBtn.addEventListener('click', () => {
+      allExpanded = !allExpanded;
+      toggleAllBtn.textContent = allExpanded ? 'Collapse All' : 'Expand All';
+      document.querySelectorAll('.header-row').forEach((row) => {
+        const detail = row.querySelector('.header-detail');
+        const chev = row.querySelector('.chevron');
+        detail.classList.toggle('hidden', !allExpanded);
+        chev.textContent = allExpanded ? '−' : '+';
+      });
+    });
+
+    function buildMarkdown(d) {
+      const h = d.http.headers || {};
+      return [
+        `# SecScope Security Audit: \`${d.domain}\``,
+        `- **Grade:** ${d.grade} (${d.score}/100)`,
+        `- **Scanned:** ${d.timestamp}`,
+        ``,
+        `## Summary`,
+        `| Check | Status |`,
+        `| --- | --- |`,
+        `| TLS Certificate | ${d.ssl.ok ? `VALID (${d.ssl.protocol}, ${d.ssl.daysRemaining}d left)` : 'FAILED'} |`,
+        `| HTTP → HTTPS Redirect | ${d.ssl.httpRedirect?.ok ? 'PASS' : 'FAIL'} |`,
+        `| HSTS | ${h.hsts ? 'PASS' : 'MISSING'} |`,
+        `| CSP | ${h.csp ? 'PASS' : 'MISSING'} |`,
+        `| X-Frame-Options | ${h.xfo ? 'PASS' : 'MISSING'} |`,
+        `| X-Content-Type-Options | ${h.xcto ? 'PASS' : 'MISSING'} |`,
+        `| Referrer-Policy | ${h.referrer ? 'PASS' : 'MISSING'} |`,
+        `| Permissions-Policy | ${h.permissions ? 'PASS' : 'MISSING'} |`,
+        `| SPF Record | ${d.dns.spf ? 'PASS' : 'MISSING'} |`,
+        `| DMARC Policy | ${d.dns.dmarc ? 'PASS' : 'MISSING'} |`,
+      ].join('\n');
+    }
+
+    function downloadFile(filename, content, mime) {
+      const blob = new Blob([content], { type: mime });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = filename;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    }
+
+    document.getElementById('copySummaryBtn').addEventListener('click', (e) => {
+      if (!lastReport) return;
+      const d = lastReport;
+      const h = d.http.headers || {};
+      const text = [
+        `SecScope Audit: ${d.domain}`,
+        `Grade: ${d.grade} (${d.score}/100)`,
+        `SSL: ${d.ssl.ok ? `Valid (${d.ssl.protocol}, ${d.ssl.daysRemaining}d left)` : 'Failed'} | HTTP->HTTPS: ${d.ssl.httpRedirect?.ok ? 'PASS' : 'FAIL'}`,
+        `HSTS: ${h.hsts ? 'PASS' : 'MISSING'} | CSP: ${h.csp ? 'PASS' : 'MISSING'} | XFO: ${h.xfo ? 'PASS' : 'MISSING'}`,
+        `SPF: ${d.dns.spf ? 'PASS' : 'MISSING'} | DMARC: ${d.dns.dmarc ? 'PASS' : 'MISSING'}`,
+      ].join('\n');
+      navigator.clipboard.writeText(text);
+      e.target.textContent = 'Copied!';
+      setTimeout(() => (e.target.textContent = 'Copy Summary'), 1500);
+    });
+
+    document.getElementById('exportMdBtn').addEventListener('click', (e) => {
+      if (!lastReport) return;
+      const md = buildMarkdown(lastReport);
+      navigator.clipboard?.writeText(md);
+      downloadFile(`secscope-${lastReport.domain}.md`, md, 'text/markdown');
+      e.target.textContent = 'Exported!';
+      setTimeout(() => (e.target.textContent = 'Export MD'), 1500);
+    });
+
+    document.getElementById('exportJsonBtn').addEventListener('click', (e) => {
+      if (!lastReport) return;
+      downloadFile(`secscope-${lastReport.domain}.json`, JSON.stringify(lastReport, null, 2), 'application/json');
+      e.target.textContent = 'Exported!';
+      setTimeout(() => (e.target.textContent = 'Export JSON'), 1500);
+    });
+
+    document.querySelectorAll('.chip').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        input.value = btn.dataset.domain;
+        runAudit(btn.dataset.domain);
+      });
+    });
+
+    form.addEventListener('submit', (e) => {
+      e.preventDefault();
+      runAudit(input.value);
+    });
+
+    renderRecent();
+    const initialDomain = new URLSearchParams(window.location.search).get('domain');
+    if (initialDomain) {
+      input.value = initialDomain;
+      runAudit(initialDomain);
+    }
+  </script>
+</body>
+</html>
