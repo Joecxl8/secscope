@@ -132,50 +132,106 @@
     <!-- Results Dashboard -->
     <div id="results" class="hidden mt-8 space-y-5">
       <!-- Score Banner -->
-      <section class="bg-surface border border-borderDark rounded-2xl p-5 sm:p-6 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
-        <div class="flex items-center gap-5">
-          <!-- Animated Radial Score Gauge -->
-          <div class="relative w-24 h-24 shrink-0 flex items-center justify-center">
-            <svg class="w-24 h-24 -rotate-90" viewBox="0 0 100 100">
-              <circle cx="50" cy="50" r="42" fill="none" stroke="#1f1f29" stroke-width="7"></circle>
-              <circle
-                id="gaugeCircle"
-                class="gauge-ring"
-                cx="50"
-                cy="50"
-                r="42"
-                fill="none"
-                stroke="#ff2a40"
-                stroke-width="7"
-                stroke-linecap="round"
-                stroke-dasharray="263.89"
-                stroke-dashoffset="263.89"
-              ></circle>
-            </svg>
-            <div class="absolute inset-0 flex flex-col items-center justify-center">
-              <span id="gradeText" class="font-mono text-2xl font-extrabold leading-none text-white">--</span>
-              <span id="scoreNumText" class="font-mono text-[11px] text-zinc-400 mt-0.5">0/100</span>
+      <section class="bg-surface border border-borderDark rounded-2xl p-5 sm:p-6">
+        <div class="flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+          <div class="flex items-center gap-5">
+            <!-- Animated Radial Score Gauge -->
+            <div class="relative w-24 h-24 shrink-0 flex items-center justify-center">
+              <svg class="w-24 h-24 -rotate-90" viewBox="0 0 100 100">
+                <circle cx="50" cy="50" r="42" fill="none" stroke="#1f1f29" stroke-width="7"></circle>
+                <circle
+                  id="gaugeCircle"
+                  class="gauge-ring"
+                  cx="50"
+                  cy="50"
+                  r="42"
+                  fill="none"
+                  stroke="#ff2a40"
+                  stroke-width="7"
+                  stroke-linecap="round"
+                  stroke-dasharray="263.89"
+                  stroke-dashoffset="263.89"
+                ></circle>
+              </svg>
+              <div class="absolute inset-0 flex flex-col items-center justify-center">
+                <span id="gradeText" class="font-mono text-2xl font-extrabold leading-none text-white">--</span>
+                <span id="scoreNumText" class="font-mono text-[11px] text-zinc-400 mt-0.5">0/100</span>
+              </div>
+            </div>
+
+            <div>
+              <div class="font-mono text-xs uppercase tracking-widest text-zinc-500">Target Audited</div>
+              <h2 id="resDomain" class="font-mono text-xl sm:text-2xl font-bold text-white break-all"></h2>
+              <p id="resMeta" class="font-mono text-xs text-zinc-400 mt-1"></p>
             </div>
           </div>
 
-          <div>
-            <div class="font-mono text-xs uppercase tracking-widest text-zinc-500">Target Audited</div>
-            <h2 id="resDomain" class="font-mono text-xl sm:text-2xl font-bold text-white break-all"></h2>
-            <p id="resMeta" class="font-mono text-xs text-zinc-400 mt-1"></p>
+          <!-- Export & Share Controls -->
+          <div class="flex flex-wrap gap-2 w-full md:w-auto">
+            <button id="copySummaryBtn" class="flex-1 md:flex-none px-3.5 py-2 rounded-lg bg-surfaceLight border border-borderDark hover:border-crimson text-zinc-200 font-mono text-xs transition-colors cursor-pointer">
+              Copy Summary
+            </button>
+            <button id="exportMdBtn" class="flex-1 md:flex-none px-3.5 py-2 rounded-lg bg-surfaceLight border border-borderDark hover:border-crimson text-zinc-200 font-mono text-xs transition-colors cursor-pointer">
+              Export MD
+            </button>
+            <button id="exportJsonBtn" class="flex-1 md:flex-none px-3.5 py-2 rounded-lg bg-surfaceLight border border-borderDark hover:border-crimson text-zinc-200 font-mono text-xs transition-colors cursor-pointer">
+              Export JSON
+            </button>
           </div>
         </div>
 
-        <!-- Export & Share Controls -->
-        <div class="flex flex-wrap gap-2 w-full md:w-auto">
-          <button id="copySummaryBtn" class="flex-1 md:flex-none px-3.5 py-2 rounded-lg bg-surfaceLight border border-borderDark hover:border-crimson text-zinc-200 font-mono text-xs transition-colors cursor-pointer">
-            Copy Summary
+        <!-- Collapsible Scoring Rubric -->
+        <div class="mt-5 pt-4 border-t border-borderDark">
+          <button
+            type="button"
+            id="rubricToggleBtn"
+            class="flex items-center gap-2 font-mono text-xs text-zinc-400 hover:text-crimson transition-colors cursor-pointer"
+          >
+            <span id="rubricChevron">+</span>
+            <span>Scoring Rubric (100 pts)</span>
           </button>
-          <button id="exportMdBtn" class="flex-1 md:flex-none px-3.5 py-2 rounded-lg bg-surfaceLight border border-borderDark hover:border-crimson text-zinc-200 font-mono text-xs transition-colors cursor-pointer">
-            Export MD
-          </button>
-          <button id="exportJsonBtn" class="flex-1 md:flex-none px-3.5 py-2 rounded-lg bg-surfaceLight border border-borderDark hover:border-crimson text-zinc-200 font-mono text-xs transition-colors cursor-pointer">
-            Export JSON
-          </button>
+
+          <div id="rubricPanel" class="hidden mt-3 bg-obsidian border border-borderDark rounded-xl p-4 text-xs">
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 font-mono">
+              <div>
+                <div class="text-zinc-300 font-bold mb-1.5">TLS &amp; Redirects <span class="text-zinc-500">(25 pts)</span></div>
+                <ul class="space-y-1 text-zinc-400">
+                  <li class="flex justify-between"><span>Valid TLS Cert</span><span class="text-zinc-200">+20</span></li>
+                  <li class="flex justify-between"><span>HTTP → HTTPS</span><span class="text-zinc-200">+5</span></li>
+                </ul>
+              </div>
+              <div>
+                <div class="text-zinc-300 font-bold mb-1.5">HTTP Headers <span class="text-zinc-500">(65 pts)</span></div>
+                <ul class="space-y-1 text-zinc-400">
+                  <li class="flex justify-between"><span>CSP</span><span class="text-zinc-200">+20</span></li>
+                  <li class="flex justify-between"><span>HSTS</span><span class="text-zinc-200">+15</span></li>
+                  <li class="flex justify-between"><span>X-Frame-Options</span><span class="text-zinc-200">+10</span></li>
+                  <li class="flex justify-between"><span>X-Content-Type</span><span class="text-zinc-200">+10</span></li>
+                  <li class="flex justify-between"><span>Referrer-Policy</span><span class="text-zinc-200">+5</span></li>
+                  <li class="flex justify-between"><span>Permissions-Policy</span><span class="text-zinc-200">+5</span></li>
+                </ul>
+              </div>
+              <div>
+                <div class="text-zinc-300 font-bold mb-1.5">DNS &amp; Email <span class="text-zinc-500">(10 pts)</span></div>
+                <ul class="space-y-1 text-zinc-400">
+                  <li class="flex justify-between"><span>SPF Record</span><span class="text-zinc-200">+5</span></li>
+                  <li class="flex justify-between"><span>DMARC Policy</span><span class="text-zinc-200">+5</span></li>
+                </ul>
+                <div class="text-[11px] text-zinc-500 mt-2.5 leading-relaxed">
+                  CAA records, cookie flags, and server banners are reported for visibility without point deductions.
+                </div>
+              </div>
+            </div>
+            <div class="mt-3 pt-3 border-t border-borderDark flex flex-wrap items-center gap-x-4 gap-y-1 font-mono text-[11px] text-zinc-400">
+              <span class="text-zinc-500 uppercase">Grades:</span>
+              <span><strong class="text-emerald-400">A+</strong> 95–100</span>
+              <span><strong class="text-emerald-400">A</strong> 85–94</span>
+              <span><strong class="text-amber-400">B</strong> 75–84</span>
+              <span><strong class="text-amber-400">C</strong> 60–74</span>
+              <span><strong class="text-crimson">D</strong> 45–59</span>
+              <span><strong class="text-crimson">F</strong> 0–44</span>
+            </div>
+          </div>
         </div>
       </section>
 
@@ -245,6 +301,9 @@
     const recentWrap = document.getElementById('recentWrap');
     const recentList = document.getElementById('recentList');
     const toggleAllBtn = document.getElementById('toggleAllBtn');
+    const rubricToggleBtn = document.getElementById('rubricToggleBtn');
+    const rubricPanel = document.getElementById('rubricPanel');
+    const rubricChevron = document.getElementById('rubricChevron');
 
     let lastReport = null;
     let allExpanded = false;
@@ -265,6 +324,11 @@
       };
       return `<span class="font-mono text-[10px] font-bold px-2 py-0.5 rounded uppercase whitespace-nowrap ${styles[type] || styles.info}">${esc(text)}</span>`;
     };
+
+    rubricToggleBtn.addEventListener('click', () => {
+      const isHidden = rubricPanel.classList.toggle('hidden');
+      rubricChevron.textContent = isHidden ? '+' : '−';
+    });
 
     function cleanDomain(raw) {
       return raw.trim().toLowerCase().replace(/^https?:\/\//, '').split('/')[0].split(':')[0];
@@ -459,7 +523,6 @@
       const domain = cleanDomain(rawDomain);
       if (!domain) return;
 
-      // Sync URL param for shareable links
       try {
         const url = new URL(window.location.href);
         url.searchParams.set('domain', domain);
@@ -564,28 +627,46 @@
         : `<div class="py-2.5 flex justify-between items-center"><span class="text-zinc-400">Certificate</span>${pill('fail', 'FAILED')}</div>
            <div class="py-2.5 font-mono text-xs text-red-400">${esc(d.ssl.error || 'TLS handshake failed')}</div>`;
 
-      // 2. DNS & Email Security
+      // 2. DNS & Email Security (full unwrapped/scrollable TXT records)
       const dnsOk = Boolean(d.dns.spf && d.dns.dmarc);
       const dnsBadge = document.getElementById('dnsBadge');
       dnsBadge.className = `font-mono text-[10px] px-2 py-0.5 rounded font-bold ${dnsOk ? 'bg-emerald-500/15 text-emerald-400' : 'bg-amber-500/15 text-amber-400'}`;
       dnsBadge.textContent = dnsOk ? 'HARDENED' : 'PARTIAL';
 
       document.getElementById('dnsBody').innerHTML = `
-        <div class="py-2.5 flex justify-between items-start gap-3">
-          <div><div class="text-zinc-300">IPv4 Resolution</div><div class="font-mono text-xs text-zinc-500 break-all mt-0.5">${esc(d.dns.ips.join(', '))}</div></div>
-          ${pill('pass', 'OK')}
+        <div class="py-2.5">
+          <div class="flex justify-between items-center gap-3">
+            <span class="text-zinc-300">IPv4 Resolution</span>
+            ${pill('pass', 'OK')}
+          </div>
+          <div class="font-mono text-xs text-zinc-400 break-all mt-1">${esc(d.dns.ips.join(', '))}</div>
         </div>
-        <div class="py-2.5 flex justify-between items-start gap-3">
-          <div><div class="text-zinc-300">SPF Record</div><div class="font-mono text-xs text-zinc-500 break-all mt-0.5">${d.dns.spf ? esc(d.dns.spf.slice(0, 85)) : 'Missing — domain vulnerable to email spoofing'}</div></div>
-          ${d.dns.spf ? pill('pass', 'PASS') : pill('fail', 'MISSING')}
+        <div class="py-2.5">
+          <div class="flex justify-between items-center gap-3">
+            <span class="text-zinc-300">SPF Record</span>
+            ${d.dns.spf ? pill('pass', 'PASS') : pill('fail', 'MISSING')}
+          </div>
+          ${d.dns.spf
+            ? `<div class="font-mono text-[11px] bg-obsidian border border-borderDark rounded p-2 text-zinc-300 break-all max-h-24 overflow-y-auto mt-1.5">${esc(d.dns.spf)}</div>`
+            : `<div class="font-mono text-xs text-zinc-500 mt-1">Missing — domain vulnerable to email spoofing</div>`
+          }
         </div>
-        <div class="py-2.5 flex justify-between items-start gap-3">
-          <div><div class="text-zinc-300">DMARC Policy</div><div class="font-mono text-xs text-zinc-500 break-all mt-0.5">${d.dns.dmarc ? esc(d.dns.dmarc.slice(0, 85)) : 'Missing — no spoofing enforcement policy'}</div></div>
-          ${d.dns.dmarc ? pill('pass', 'PASS') : pill('fail', 'MISSING')}
+        <div class="py-2.5">
+          <div class="flex justify-between items-center gap-3">
+            <span class="text-zinc-300">DMARC Policy</span>
+            ${d.dns.dmarc ? pill('pass', 'PASS') : pill('fail', 'MISSING')}
+          </div>
+          ${d.dns.dmarc
+            ? `<div class="font-mono text-[11px] bg-obsidian border border-borderDark rounded p-2 text-zinc-300 break-all max-h-24 overflow-y-auto mt-1.5">${esc(d.dns.dmarc)}</div>`
+            : `<div class="font-mono text-xs text-zinc-500 mt-1">Missing — no spoofing enforcement policy</div>`
+          }
         </div>
-        <div class="py-2.5 flex justify-between items-start gap-3">
-          <div><div class="text-zinc-300">CAA Record</div><div class="font-mono text-xs text-zinc-500 break-all mt-0.5">${d.dns.caa.length ? esc(d.dns.caa.join(', ')) : 'Not configured (any CA can issue certs)'}</div></div>
-          ${d.dns.caa.length ? pill('pass', 'SET') : pill('warn', 'INFO')}
+        <div class="py-2.5">
+          <div class="flex justify-between items-center gap-3">
+            <span class="text-zinc-300">CAA Record</span>
+            ${d.dns.caa.length ? pill('pass', 'SET') : pill('warn', 'INFO')}
+          </div>
+          <div class="font-mono text-xs text-zinc-500 break-all mt-1">${d.dns.caa.length ? esc(d.dns.caa.join(', ')) : 'Not configured (any CA can issue certs)'}</div>
         </div>
       `;
 
