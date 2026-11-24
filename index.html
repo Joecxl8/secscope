@@ -50,6 +50,21 @@
     .crimson-glow:hover {
       box-shadow: 0 0 20px rgba(255, 42, 64, 0.28);
     }
+    @media print {
+      body {
+        background: #ffffff !important;
+        color: #111827 !important;
+      }
+      #auditForm, #recentWrap, .no-print, footer {
+        display: none !important;
+      }
+      section {
+        background: #ffffff !important;
+        border-color: #d1d5db !important;
+        color: #111827 !important;
+        break-inside: avoid;
+      }
+    }
   </style>
 </head>
 <body class="min-h-screen flex flex-col antialiased selection:bg-crimson selection:text-white">
@@ -73,14 +88,14 @@
         </div>
         <p class="text-zinc-400 text-sm mt-1">Live TLS, HTTP security header, cookie flag &amp; DNS posture auditor.</p>
       </div>
-      <div class="font-mono text-xs text-zinc-500 flex items-center gap-2">
+      <div class="font-mono text-xs text-zinc-500 flex items-center gap-2 no-print">
         <span class="w-2 h-2 rounded-full bg-crimson animate-pulse"></span>
         <span>ENGINE READY</span>
       </div>
     </header>
 
     <!-- Search Bar -->
-    <form id="auditForm" class="flex flex-col sm:flex-row gap-2.5 bg-surface border border-borderDark focus-within:border-crimson/70 rounded-xl p-2 transition-colors">
+    <form id="auditForm" class="flex flex-col sm:flex-row gap-2.5 bg-surface border border-borderDark focus-within:border-crimson/70 rounded-xl p-2 transition-colors no-print">
       <div class="flex-1 flex items-center px-3">
         <span class="font-mono text-crimson mr-2 select-none">&gt;</span>
         <input
@@ -103,7 +118,7 @@
     </form>
 
     <!-- Quick Chips & Recent Scans -->
-    <div class="mt-3 flex flex-wrap items-center justify-between gap-3">
+    <div class="mt-3 flex flex-wrap items-center justify-between gap-3 no-print">
       <div class="flex flex-wrap items-center gap-2 font-mono text-xs text-zinc-500">
         <span>TARGETS:</span>
         <button type="button" class="chip px-2.5 py-1 rounded-md bg-surface border border-borderDark text-zinc-300 hover:border-crimson hover:text-white transition-colors" data-domain="github.com">github.com</button>
@@ -118,7 +133,7 @@
     </div>
 
     <!-- Live Terminal Scan Log -->
-    <section id="scanLogBox" class="hidden mt-6 bg-surface border border-borderDark rounded-xl p-4 font-mono text-xs">
+    <section id="scanLogBox" class="hidden mt-6 bg-surface border border-borderDark rounded-xl p-4 font-mono text-xs no-print">
       <div class="flex items-center gap-2 text-zinc-500 pb-2 mb-2 border-b border-borderDark">
         <span class="w-2.5 h-2.5 rounded-full bg-crimson"></span>
         <span>SECSCOPE // LIVE RECON STREAM</span>
@@ -167,9 +182,12 @@
           </div>
 
           <!-- Export & Share Controls -->
-          <div class="flex flex-wrap gap-2 w-full md:w-auto">
+          <div class="flex flex-wrap gap-2 w-full md:w-auto no-print">
             <button id="copySummaryBtn" class="flex-1 md:flex-none px-3.5 py-2 rounded-lg bg-surfaceLight border border-borderDark hover:border-crimson text-zinc-200 font-mono text-xs transition-colors cursor-pointer">
               Copy Summary
+            </button>
+            <button id="exportPdfBtn" class="flex-1 md:flex-none px-3.5 py-2 rounded-lg bg-crimson/15 border border-crimson/50 hover:bg-crimson hover:text-white text-crimson font-mono text-xs font-bold transition-colors cursor-pointer">
+              Export PDF
             </button>
             <button id="exportMdBtn" class="flex-1 md:flex-none px-3.5 py-2 rounded-lg bg-surfaceLight border border-borderDark hover:border-crimson text-zinc-200 font-mono text-xs transition-colors cursor-pointer">
               Export MD
@@ -181,7 +199,7 @@
         </div>
 
         <!-- Collapsible Scoring Rubric -->
-        <div class="mt-5 pt-4 border-t border-borderDark">
+        <div class="mt-5 pt-4 border-t border-borderDark no-print">
           <button
             type="button"
             id="rubricToggleBtn"
@@ -267,7 +285,7 @@
       <section class="bg-surface border border-borderDark rounded-2xl p-5">
         <div class="flex items-center justify-between pb-3 mb-3 border-b border-borderDark">
           <h3 class="font-mono text-xs uppercase tracking-widest text-zinc-400">HTTP Security Headers</h3>
-          <button id="toggleAllBtn" class="font-mono text-xs text-zinc-400 hover:text-crimson transition-colors cursor-pointer">
+          <button id="toggleAllBtn" class="font-mono text-xs text-zinc-400 hover:text-crimson transition-colors cursor-pointer no-print">
             Expand All
           </button>
         </div>
@@ -365,7 +383,6 @@
       } catch {}
     }
 
-    // Live Google DoH fallback for Preview Mode when /api/audit is unavailable
     async function dohQuery(name, type) {
       try {
         const res = await fetch(`https://dns.google/resolve?name=${encodeURIComponent(name)}&type=${type}`);
@@ -627,7 +644,7 @@
         : `<div class="py-2.5 flex justify-between items-center"><span class="text-zinc-400">Certificate</span>${pill('fail', 'FAILED')}</div>
            <div class="py-2.5 font-mono text-xs text-red-400">${esc(d.ssl.error || 'TLS handshake failed')}</div>`;
 
-      // 2. DNS & Email Security (full unwrapped/scrollable TXT records)
+      // 2. DNS & Email Security
       const dnsOk = Boolean(d.dns.spf && d.dns.dmarc);
       const dnsBadge = document.getElementById('dnsBadge');
       dnsBadge.className = `font-mono text-[10px] px-2 py-0.5 rounded font-bold ${dnsOk ? 'bg-emerald-500/15 text-emerald-400' : 'bg-amber-500/15 text-amber-400'}`;
@@ -761,6 +778,118 @@
       });
     });
 
+    function buildPrintablePdfHtml(d) {
+      const h = d.http?.headers || {};
+      const redir = d.ssl?.httpRedirect || { ok: false, status: null };
+      const cookies = d.http?.cookies || [];
+      const gradeColor = d.score >= 85 ? '#059669' : d.score >= 60 ? '#d97706' : '#dc2626';
+      const badge = (ok, yesText = 'PASS', noText = 'MISSING') =>
+        ok
+          ? `<span style="background:#ecfdf5;color:#047857;border:1px solid #a7f3d0;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;">${esc(yesText)}</span>`
+          : `<span style="background:#fef2f2;color:#b91c1c;border:1px solid #fecaca;padding:2px 8px;border-radius:4px;font-size:11px;font-weight:700;">${esc(noText)}</span>`;
+
+      const headerRows = [
+        ['Strict-Transport-Security (HSTS)', h.hsts],
+        ['Content-Security-Policy (CSP)', h.csp],
+        ['X-Frame-Options', h.xfo],
+        ['X-Content-Type-Options', h.xcto],
+        ['Referrer-Policy', h.referrer],
+        ['Permissions-Policy', h.permissions],
+      ].map(([name, val]) => `
+        <tr>
+          <td style="font-weight:600;">${esc(name)}</td>
+          <td>${badge(Boolean(val))}</td>
+          <td style="font-family:monospace;font-size:11px;word-break:break-all;color:#374151;">${val ? esc(val) : '—'}</td>
+        </tr>
+      `).join('');
+
+      const cookieRows = cookies.length
+        ? cookies.map((c) => `
+            <tr>
+              <td style="font-family:monospace;font-size:12px;">${esc(c.name)}</td>
+              <td>${badge(c.secure, 'Yes', 'No')}</td>
+              <td>${badge(c.httpOnly, 'Yes', 'No')}</td>
+              <td style="font-family:monospace;font-size:12px;">${esc(c.sameSite || 'Unset')}</td>
+            </tr>
+          `).join('')
+        : `<tr><td colspan="4" style="color:#6b7280;">No Set-Cookie headers returned on initial GET request.</td></tr>`;
+
+      return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>SecScope Report — ${esc(d.domain)}</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; color: #111827; margin: 0; padding: 32px; background: #fff; line-height: 1.45; }
+    .top { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #111827; padding-bottom: 16px; margin-bottom: 24px; }
+    .brand { font-family: monospace; font-size: 20px; font-weight: 800; }
+    .brand span { color: #e11d48; }
+    .meta { font-size: 12px; color: #6b7280; margin-top: 4px; }
+    .score-box { text-align: right; }
+    .grade { font-family: monospace; font-size: 34px; font-weight: 800; color: ${gradeColor}; line-height: 1; }
+    .pts { font-family: monospace; font-size: 13px; color: #4b5563; }
+    h2 { font-family: monospace; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; color: #374151; border-bottom: 1px solid #e5e7eb; padding-bottom: 6px; margin: 22px 0 10px; }
+    table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    th, td { text-align: left; padding: 8px 10px; border-bottom: 1px solid #e5e7eb; vertical-align: top; }
+    th { background: #f9fafb; font-size: 11px; text-transform: uppercase; color: #6b7280; }
+    .code { font-family: monospace; font-size: 11px; background: #f3f4f6; padding: 6px 8px; border-radius: 4px; word-break: break-all; }
+    .footer { margin-top: 28px; padding-top: 12px; border-top: 1px solid #e5e7eb; font-size: 11px; color: #6b7280; display: flex; justify-content: space-between; }
+    @media print { body { padding: 16px; } }
+  </style>
+</head>
+<body>
+  <div class="top">
+    <div>
+      <div class="brand">Sec<span>Scope</span> // Security Audit Report</div>
+      <div class="meta">Target: <strong>${esc(d.domain)}</strong> &bull; Scanned: ${esc(new Date(d.timestamp).toLocaleString())} &bull; HTTP ${esc(d.http?.statusCode || 'N/A')}</div>
+    </div>
+    <div class="score-box">
+      <div class="grade">${esc(d.grade)}</div>
+      <div class="pts">${esc(d.score)} / 100</div>
+    </div>
+  </div>
+
+  <h2>1. TLS / SSL &amp; Redirects</h2>
+  <table>
+    <tr><td style="width:30%;font-weight:600;">Certificate Status</td><td>${d.ssl?.ok ? badge(true, 'VALID') : badge(false, '', 'FAILED')}</td></tr>
+    <tr><td style="font-weight:600;">Protocol</td><td style="font-family:monospace;">${esc(d.ssl?.protocol || 'N/A')}</td></tr>
+    <tr><td style="font-weight:600;">Issuer</td><td>${esc(d.ssl?.issuer || 'N/A')}</td></tr>
+    <tr><td style="font-weight:600;">Expires In</td><td style="font-family:monospace;">${d.ssl?.daysRemaining != null ? `${esc(d.ssl.daysRemaining)} days` : 'N/A'}</td></tr>
+    <tr><td style="font-weight:600;">HTTP &rarr; HTTPS Redirect</td><td>${redir.ok ? badge(true, `REDIRECT ${redir.status}`) : badge(false, '', redir.status ? `NO REDIRECT (${redir.status})` : 'UNENFORCED')}</td></tr>
+  </table>
+
+  <h2>2. DNS &amp; Email Security</h2>
+  <table>
+    <tr><td style="width:30%;font-weight:600;">IPv4 Resolution</td><td style="font-family:monospace;font-size:12px;">${esc((d.dns?.ips || []).join(', ') || 'None')}</td></tr>
+    <tr><td style="font-weight:600;">SPF Record</td><td>${d.dns?.spf ? `<div class="code">${esc(d.dns.spf)}</div>` : badge(false)}</td></tr>
+    <tr><td style="font-weight:600;">DMARC Policy</td><td>${d.dns?.dmarc ? `<div class="code">${esc(d.dns.dmarc)}</div>` : badge(false)}</td></tr>
+    <tr><td style="font-weight:600;">CAA Record</td><td style="font-family:monospace;font-size:12px;">${d.dns?.caa?.length ? esc(d.dns.caa.join(', ')) : 'Not configured'}</td></tr>
+  </table>
+
+  <h2>3. HTTP Security Headers</h2>
+  ${d.http?.ok
+    ? `<table><thead><tr><th style="width:28%;">Header</th><th style="width:14%;">Status</th><th>Raw Policy Value</th></tr></thead><tbody>${headerRows}</tbody></table>`
+    : `<p style="color:#b91c1c;font-family:monospace;font-size:12px;">HTTPS request failed: ${esc(d.http?.error || 'Unknown error')}</p>`
+  }
+
+  <h2>4. Cookie Security Flags (${cookies.length} detected)</h2>
+  <table>
+    <thead><tr><th>Cookie</th><th>Secure</th><th>HttpOnly</th><th>SameSite</th></tr></thead>
+    <tbody>${cookieRows}</tbody>
+  </table>
+
+  <div class="footer">
+    <span>Generated by SecScope // secscope.vercel.app</span>
+    <span>Built by Joe Manu Thomas (@Joecxl8)</span>
+  </div>
+  <script>
+    window.onload = function() { setTimeout(function() { window.print(); }, 200); };
+  <\/script>
+</body>
+</html>`;
+    }
+
     function buildMarkdown(d) {
       const h = d.http.headers || {};
       return [
@@ -792,6 +921,18 @@
       a.click();
       URL.revokeObjectURL(a.href);
     }
+
+    document.getElementById('exportPdfBtn').addEventListener('click', () => {
+      if (!lastReport) return;
+      const win = window.open('', '_blank', 'width=900,height=700');
+      if (win) {
+        win.document.open();
+        win.document.write(buildPrintablePdfHtml(lastReport));
+        win.document.close();
+      } else {
+        window.print();
+      }
+    });
 
     document.getElementById('copySummaryBtn').addEventListener('click', (e) => {
       if (!lastReport) return;
