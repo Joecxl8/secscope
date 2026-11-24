@@ -3,6 +3,11 @@ const dns = require('dns').promises;
 
 const DOMAIN_REGEX = /^(?!-)[a-z0-9-]{1,63}(?<!-)(\.[a-z0-9-]{1,63})+$/i;
 
+const REQ_HEADERS = {
+  'User-Agent': 'Mozilla/5.0 (compatible; SecScope/1.0; +https://secscope.vercel.app)',
+  'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
+};
+
 // Simple per-instance rate limiter (20 requests / minute per IP)
 const rateMap = new Map();
 function isRateLimited(ip) {
@@ -83,8 +88,8 @@ async function checkHttpRedirect(domain) {
     const res = await fetch(`http://${domain}`, {
       method: 'GET',
       redirect: 'manual',
-      signal: AbortSignal.timeout(4000),
-      headers: { 'User-Agent': 'SecScope-Auditor/1.0' },
+      signal: AbortSignal.timeout(5000),
+      headers: REQ_HEADERS,
     });
     const location = res.headers.get('location') || '';
     const isRedirect = res.status >= 300 && res.status < 400 && location.toLowerCase().startsWith('https://');
@@ -112,28 +117,34 @@ function parseCookies(rawCookies) {
 
 async function checkHeaders(domain) {
   try {
-    // Use manual redirect to prevent redirect-based SSRF into internal IPs
     let res = await fetch(`https://${domain}`, {
       method: 'GET',
       redirect: 'manual',
-      signal: AbortSignal.timeout(6000),
-      headers: { 'User-Agent': 'SecScope-Auditor/1.0' },
+      signal: AbortSignal.timeout(8000),
+      headers: REQ_HEADERS,
     });
 
     // Follow at most 1 safe HTTPS redirect on a valid public domain
     if (res.status >= 300 && res.status < 400) {
       const loc = res.headers.get('location');
-      if (loc && loc.startsWith('https://')) {
-        const nextHost = new URL(loc).hostname.toLowerCase();
-        if (DOMAIN_REGEX.test(nextHost)) {
-          const nextIps = await dns.resolve4(nextHost).catch(() => []);
-          if (nextIps.length && !nextIps.some(isPrivateIP)) {
-            res = await fetch(loc, {
-              method: 'GET',
-              redirect: 'manual',
-              signal: AbortSignal.timeout(5000),
-              headers: { 'User-Agent': 'SecScope-Auditor/1.0' },
-            });
+      if (loc) {
+        const nextUrl = new URL(loc, `https://${domain}`);
+        if (nextUrl.protocol === 'https:') {
+          const nextHost = nextUrl.hostname.toLowerCase();
+          if (DOMAIN_REGEX.test(nextHost)) {
+            const [nextIps4, nextIps6] = await Promise.all([
+              dns.resolve4(nextHost).catch(() => []),
+              dns.resolve6(nextHost).catch(() => []),
+            ]);
+            const nextIps = [...nextIps4, ...nextIps6];
+            if (nextIps.length && !nextIps.some(isPrivateIP)) {
+              res = await fetch(nextUrl.toString(), {
+                method: 'GET',
+                redirect: 'manual',
+                signal: AbortSignal.timeout(6000),
+                headers: REQ_HEADERS,
+              });
+            }
           }
         }
       }
@@ -160,8 +171,9 @@ async function checkHeaders(domain) {
       },
       cookies: parseCookies(rawCookies),
     };
-  } catch {
-    return { ok: false, error: 'HTTPS request failed or timed out', cookies: [] };
+  } catch (err) {
+    const reason = err?.name === 'TimeoutError' ? 'Target timed out (8s)' : (err?.cause?.code || 'HTTPS request failed');
+    return { ok: false, error: reason, cookies: [] };
   }
 }
 
