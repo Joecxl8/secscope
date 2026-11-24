@@ -539,6 +539,7 @@
     async function runAudit(rawDomain) {
       const domain = cleanDomain(rawDomain);
       if (!domain) return;
+      input.value = domain;
 
       try {
         const url = new URL(window.location.href);
@@ -593,17 +594,30 @@
       }
     }
 
+    let gaugeTimer = null;
+    function gradeForScore(s) {
+      if (s >= 95) return 'A+';
+      if (s >= 85) return 'A';
+      if (s >= 75) return 'B';
+      if (s >= 60) return 'C';
+      if (s >= 45) return 'D';
+      return 'F';
+    }
+
     function animateGauge(score, grade) {
       const circle = document.getElementById('gaugeCircle');
       const gradeEl = document.getElementById('gradeText');
       const scoreEl = document.getElementById('scoreNumText');
 
+      if (gaugeTimer) clearInterval(gaugeTimer);
+
       const strokeColor = score >= 85 ? '#10b981' : score >= 60 ? '#f59e0b' : '#ff2a40';
       circle.style.stroke = strokeColor;
       circle.style.strokeDashoffset = CIRCUMFERENCE;
 
-      gradeEl.textContent = grade;
+      gradeEl.textContent = 'F';
       gradeEl.style.color = strokeColor;
+      scoreEl.textContent = '0/100';
 
       requestAnimationFrame(() => {
         const offset = CIRCUMFERENCE - (score / 100) * CIRCUMFERENCE;
@@ -612,10 +626,14 @@
 
       let current = 0;
       const step = Math.max(1, Math.ceil(score / 25));
-      const timer = setInterval(() => {
+      gaugeTimer = setInterval(() => {
         current = Math.min(score, current + step);
         scoreEl.textContent = `${current}/100`;
-        if (current >= score) clearInterval(timer);
+        gradeEl.textContent = current >= score ? grade : gradeForScore(current);
+        if (current >= score) {
+          clearInterval(gaugeTimer);
+          gaugeTimer = null;
+        }
       }, 24);
     }
 
@@ -625,11 +643,18 @@
       document.getElementById('resMeta').textContent = `Scanned ${new Date(d.timestamp).toLocaleTimeString()} • HTTP ${d.http.statusCode || 'N/A'}`;
 
       // 1. TLS / SSL & Redirects
-      const sslBadge = document.getElementById('sslBadge');
-      sslBadge.className = `font-mono text-[10px] px-2 py-0.5 rounded font-bold ${d.ssl.ok ? 'bg-emerald-500/15 text-emerald-400' : 'bg-crimson/15 text-crimson'}`;
-      sslBadge.textContent = d.ssl.ok ? 'SECURE' : 'ISSUES';
-
       const redir = d.ssl.httpRedirect || { ok: false, status: null };
+      const sslBadge = document.getElementById('sslBadge');
+      if (!d.ssl.ok) {
+        sslBadge.className = 'font-mono text-[10px] px-2 py-0.5 rounded font-bold bg-crimson/15 text-crimson';
+        sslBadge.textContent = 'ISSUES';
+      } else if (!redir.ok) {
+        sslBadge.className = 'font-mono text-[10px] px-2 py-0.5 rounded font-bold bg-amber-500/15 text-amber-400';
+        sslBadge.textContent = 'PARTIAL';
+      } else {
+        sslBadge.className = 'font-mono text-[10px] px-2 py-0.5 rounded font-bold bg-emerald-500/15 text-emerald-400';
+        sslBadge.textContent = 'SECURE';
+      }
       document.getElementById('sslBody').innerHTML = d.ssl.ok
         ? `
           <div class="py-2.5 flex justify-between items-center gap-3"><span class="text-zinc-400">Certificate</span>${pill('pass', 'VALID')}</div>
@@ -683,7 +708,7 @@
             <span class="text-zinc-300">CAA Record</span>
             ${d.dns.caa.length ? pill('pass', 'SET') : pill('warn', 'INFO')}
           </div>
-          <div class="font-mono text-xs text-zinc-500 break-all mt-1">${d.dns.caa.length ? esc(d.dns.caa.join(', ')) : 'Not configured (any CA can issue certs)'}</div>
+          <div class="font-mono text-xs text-zinc-500 break-all mt-1">${d.dns.caa.length ? esc([...new Set(d.dns.caa)].join(', ')) : 'Not configured (any CA can issue certs)'}</div>
         </div>
       `;
 
@@ -864,7 +889,7 @@
     <tr><td style="width:30%;font-weight:600;">IPv4 Resolution</td><td style="font-family:monospace;font-size:12px;">${esc((d.dns?.ips || []).join(', ') || 'None')}</td></tr>
     <tr><td style="font-weight:600;">SPF Record</td><td>${d.dns?.spf ? `<div class="code">${esc(d.dns.spf)}</div>` : badge(false)}</td></tr>
     <tr><td style="font-weight:600;">DMARC Policy</td><td>${d.dns?.dmarc ? `<div class="code">${esc(d.dns.dmarc)}</div>` : badge(false)}</td></tr>
-    <tr><td style="font-weight:600;">CAA Record</td><td style="font-family:monospace;font-size:12px;">${d.dns?.caa?.length ? esc(d.dns.caa.join(', ')) : 'Not configured'}</td></tr>
+    <tr><td style="font-weight:600;">CAA Record</td><td style="font-family:monospace;font-size:12px;">${d.dns?.caa?.length ? esc([...new Set(d.dns.caa)].join(', ')) : 'Not configured'}</td></tr>
   </table>
 
   <h2>3. HTTP Security Headers</h2>
