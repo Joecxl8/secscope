@@ -3,13 +3,35 @@ const dns = require('dns').promises;
 
 const DOMAIN_REGEX = /^(?!-)[a-z0-9-]{1,63}(?<!-)(\.[a-z0-9-]{1,63})+$/i;
 
-function isPrivateIP(ip) {
+// Simple per-instance rate limiter (20 requests / minute per IP)
+const rateMap = new Map();
+function isRateLimited(ip) {
+  const now = Date.now();
+  const windowMs = 60 * 1000;
+  const maxReqs = 20;
+  const entry = rateMap.get(ip) || { count: 0, start: now };
+
+  if (now - entry.start > windowMs) {
+    rateMap.set(ip, { count: 1, start: now });
+    return false;
+  }
+  entry.count += 1;
+  rateMap.set(ip, entry);
+  return entry.count > maxReqs;
+}
+
+// Strict SSRF IP blocklist (IPv4, IPv6, IPv4-mapped IPv6, CGNAT, link-local, loopback)
+function isPrivateIP(rawIp) {
+  const ip = rawIp.toLowerCase().replace(/^::ffff:/, '');
   return (
+    ip === '0.0.0.0' ||
     ip.startsWith('10.') ||
     ip.startsWith('127.') ||
     ip.startsWith('192.168.') ||
     ip.startsWith('169.254.') ||
     /^172\.(1[6-9]|2\d|3[0-1])\./.test(ip) ||
+    /^100\.(6[4-9]|[7-9]\d|1[0-1]\d|12[0-7])\./.test(ip) ||
+    ip === '::' ||
     ip === '::1' ||
     ip.startsWith('fc') ||
     ip.startsWith('fd') ||
@@ -50,8 +72,8 @@ function checkTLS(domain) {
       resolve({ ok: false, error: 'TLS handshake timed out' });
     });
 
-    socket.on('error', (err) => {
-      resolve({ ok: false, error: err.message });
+    socket.on('error', () => {
+      resolve({ ok: false, error: 'TLS connection failed' });
     });
   });
 }
@@ -73,7 +95,7 @@ async function checkHttpRedirect(domain) {
 }
 
 function parseCookies(rawCookies) {
-  return rawCookies.map((str) => {
+  return rawCookies.slice(0, 25).map((str) => {
     const parts = str.split(';').map((p) => p.trim());
     const name = parts[0]?.split('=')[0] || 'unknown';
     const lower = parts.map((p) => p.toLowerCase());
@@ -90,12 +112,32 @@ function parseCookies(rawCookies) {
 
 async function checkHeaders(domain) {
   try {
-    const res = await fetch(`https://${domain}`, {
+    // Use manual redirect to prevent redirect-based SSRF into internal IPs
+    let res = await fetch(`https://${domain}`, {
       method: 'GET',
-      redirect: 'follow',
+      redirect: 'manual',
       signal: AbortSignal.timeout(6000),
       headers: { 'User-Agent': 'SecScope-Auditor/1.0' },
     });
+
+    // Follow at most 1 safe HTTPS redirect on a valid public domain
+    if (res.status >= 300 && res.status < 400) {
+      const loc = res.headers.get('location');
+      if (loc && loc.startsWith('https://')) {
+        const nextHost = new URL(loc).hostname.toLowerCase();
+        if (DOMAIN_REGEX.test(nextHost)) {
+          const nextIps = await dns.resolve4(nextHost).catch(() => []);
+          if (nextIps.length && !nextIps.some(isPrivateIP)) {
+            res = await fetch(loc, {
+              method: 'GET',
+              redirect: 'manual',
+              signal: AbortSignal.timeout(5000),
+              headers: { 'User-Agent': 'SecScope-Auditor/1.0' },
+            });
+          }
+        }
+      }
+    }
 
     const get = (name) => res.headers.get(name);
     const rawCookies = typeof res.headers.getSetCookie === 'function' ? res.headers.getSetCookie() : [];
@@ -118,8 +160,8 @@ async function checkHeaders(domain) {
       },
       cookies: parseCookies(rawCookies),
     };
-  } catch (err) {
-    return { ok: false, error: err.message, cookies: [] };
+  } catch {
+    return { ok: false, error: 'HTTPS request failed or timed out', cookies: [] };
   }
 }
 
@@ -132,8 +174,9 @@ async function checkDNS(domain) {
     }
   };
 
-  const [ips, txtRecords, dmarcRecords, caaRecords] = await Promise.all([
+  const [ips4, ips6, txtRecords, dmarcRecords, caaRecords] = await Promise.all([
     safeResolve(() => dns.resolve4(domain)),
+    safeResolve(() => dns.resolve6(domain)),
     safeResolve(() => dns.resolveTxt(domain)),
     safeResolve(() => dns.resolveTxt(`_dmarc.${domain}`)),
     safeResolve(() => dns.resolveCaa(domain)),
@@ -143,7 +186,8 @@ async function checkDNS(domain) {
   const flatDmarc = dmarcRecords.map((r) => r.join(''));
 
   return {
-    ips,
+    ips: ips4,
+    ips6,
     spf: flatTxt.find((t) => t.toLowerCase().startsWith('v=spf1')) || null,
     dmarc: flatDmarc.find((t) => t.toLowerCase().startsWith('v=dmarc1')) || null,
     caa: caaRecords.map((c) => c.issue || c.issuewild).filter(Boolean),
@@ -176,22 +220,35 @@ function calculateScore(ssl, http, dnsData) {
 }
 
 module.exports = async (req, res) => {
-  const raw = (req.query.domain || '').trim().toLowerCase();
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+
+  if (req.method !== 'GET') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  const clientIp = (req.headers['x-forwarded-for'] || '').split(',')[0].trim() || 'unknown';
+  if (isRateLimited(clientIp)) {
+    return res.status(429).json({ error: 'Too many requests. Please wait a minute.' });
+  }
+
+  const raw = String(req.query.domain || '').trim().toLowerCase();
   const domain = raw
     .replace(/^https?:\/\//, '')
     .split('/')[0]
     .split(':')[0];
 
-  if (!domain || !DOMAIN_REGEX.test(domain)) {
+  if (!domain || domain.length > 253 || !DOMAIN_REGEX.test(domain)) {
     return res.status(400).json({ error: 'Enter a valid domain name (e.g. github.com)' });
   }
 
   try {
     const dnsData = await checkDNS(domain);
-    if (dnsData.ips.length === 0) {
+    const allIps = [...dnsData.ips, ...dnsData.ips6];
+
+    if (allIps.length === 0) {
       return res.status(404).json({ error: `Could not resolve DNS for ${domain}` });
     }
-    if (dnsData.ips.some(isPrivateIP)) {
+    if (allIps.some(isPrivateIP)) {
       return res.status(403).json({ error: 'Private or local IP addresses are blocked.' });
     }
 
@@ -205,8 +262,21 @@ module.exports = async (req, res) => {
     const { score, grade } = calculateScore(ssl, http, dnsData);
 
     res.setHeader('Cache-Control', 's-maxage=60, stale-while-revalidate');
-    return res.status(200).json({ domain, timestamp: new Date().toISOString(), score, grade, ssl, http, dns: dnsData });
-  } catch (err) {
-    return res.status(500).json({ error: 'Audit failed: ' + err.message });
+    return res.status(200).json({
+      domain,
+      timestamp: new Date().toISOString(),
+      score,
+      grade,
+      ssl,
+      http,
+      dns: {
+        ips: dnsData.ips,
+        spf: dnsData.spf,
+        dmarc: dnsData.dmarc,
+        caa: dnsData.caa,
+      },
+    });
+  } catch {
+    return res.status(500).json({ error: 'Audit failed unexpectedly.' });
   }
 };
